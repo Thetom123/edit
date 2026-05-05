@@ -23,6 +23,21 @@ namespace Game
             Slash,      // /
             NewLine,    // \n
             Comment,    // # ...
+            SV,         // [1.5]
+        }
+
+        class SVEvent
+        {
+            public float Time { get; }
+            public float Multiplier { get; }
+            public float Integral { get; }
+
+            public SVEvent(float time, float multiplier, float integral)
+            {
+                Time = time;
+                Multiplier = multiplier;
+                Integral = integral;
+            }
         }
 
         class PostInfo
@@ -99,12 +114,11 @@ namespace Game
         public GameObject Note_1, Note_2, Note_3, Note_4;
         public GameObject TargetNote_1, TargetNote_2, TargetNote_3, TargetNote_4;
         public GameObject Judge;
-        //public Sprite Judge_Perfect, Judge_Perfect_Plus, Judge_Perfect_Minus;
-        //public Sprite Judge_Great, Judge_Great_Plus, Judge_Great_Minus, Judge_Miss;
-        public Sprite Judge_Perfect, Judge_Great, Judge_Good, Judge_Miss;
+        public Sprite Judge_Perfect, Judge_Great, Judge_Miss;
         public GameObject JudgeAudio;
         public GameObject JudgeTime, Playing;
-        public float speed = 1f; // Speed at which the note moves
+        public float speed = 2.0f; // Speed at which the note moves
+        public float chartOffset = 1.6f; // Offset for the first note
 
         // Time windows in seconds (convert milliseconds to seconds)
         public float perfectWindow = 33;  // 33ms
@@ -122,9 +136,14 @@ namespace Game
         private List<float> _Note_3_Times = new List<float>();
         private List<float> _Note_4_Times = new List<float>();
 
+        private List<Vector3> _Note_1_StartPos = new List<Vector3>();
+        private List<Vector3> _Note_2_StartPos = new List<Vector3>();
+        private List<Vector3> _Note_3_StartPos = new List<Vector3>();
+        private List<Vector3> _Note_4_StartPos = new List<Vector3>();
+
         public GameObject BGM;
 
-        public GameObject timeToSpawnOBJ, songTimeOBJ, BPMOBJ;
+        public GameObject timeToSpawnOBJ, songTimeOBJ;
 
         public GameObject pause;
 
@@ -137,11 +156,22 @@ namespace Game
         private bool isPause = true;
 
 
-        private float bpm;
-        private float secPerBeat;
-        //private List<Note> notes = new List<Note>();
-        private float songTime = 0f;
+        private float songTime = -1.5f;
+        private bool audioPlayed = false;
         private readonly Dictionary<Note, bool> noteSpawned = new();
+        private List<SVEvent> svEvents = new List<SVEvent>();
+
+        float GetIntegralFromZero(float t)
+        {
+            if (svEvents.Count == 0) return t;
+            SVEvent lastEvent = svEvents[0];
+            for (int i = 1; i < svEvents.Count; i++)
+            {
+                if (svEvents[i].Time <= t) lastEvent = svEvents[i];
+                else break;
+            }
+            return lastEvent.Integral + (t - lastEvent.Time) * lastEvent.Multiplier;
+        }
 
         int countPerfect = 0, countGreat = 0, countMiss = 0, combo = 0;
         int totalNotes;
@@ -173,14 +203,13 @@ namespace Game
                 return;
             }
             string chart = ChartData.ToString();
-            secPerBeat = 60f / bpm;
             var tokens = LexicalAnalysis(chart, out var tokenWarnings);
             foreach (var warning in tokenWarnings)
                 PrintWarning(chart, warning);
 
             notes = ParseTokens(tokens, out var noteWarnings);
             foreach (var note in notes)
-                Debug.Log($"{note.Time - 1.6f}: {note.Lane}");
+                Debug.Log($"{note.Time - chartOffset}: {note.Lane}");
 
             foreach (var warning in noteWarnings)
                 PrintWarning(chart, warning);
@@ -279,6 +308,22 @@ namespace Game
                         tokens.Add(new Token(TokenType.Slash, "/", line, position));
                         break;
 
+                    case '[':
+                        {
+                            int endSV = input.IndexOf(']', i);
+                            if (endSV == -1)
+                            {
+                                warnings.Add(new ErrorPos("Unclosed SV token", line, position, Math.Max(input.Length, 10)));
+                                break;
+                            }
+
+                            int len = endSV - i;
+                            tokens.Add(new Token(TokenType.SV, input.Substring(i + 1, len - 1), line, position, len));
+                            i = endSV;
+                            position += len;
+                        }
+                        break;
+
                     case '\n':
                         tokens.Add(new Token(TokenType.NewLine, "\\n", line, position));
                         line++;
@@ -317,7 +362,10 @@ namespace Game
 
             decimal bpm = 120;
             int beatsPerMeasure = 4;
-            decimal currentTime = 1.6m;
+            decimal currentTime = (decimal)chartOffset;
+            
+            svEvents.Clear();
+            svEvents.Add(new SVEvent(-1000f, 1.0f, 0f));
 
             Token? lastToken = null;
 
@@ -337,6 +385,22 @@ namespace Game
                             else bpm = bpmValue;
                         }
                         else warnings.Add(new ErrorPos("Invalid BPM", token.Line, token.Range));
+                        break;
+
+                    case TokenType.SV: // [1.5]
+                        if (float.TryParse(token.Value, out float svValue))
+                        {
+                            float t = (float)currentTime;
+                            SVEvent lastEvent = svEvents[svEvents.Count - 1];
+                            if (Mathf.Approximately(lastEvent.Time, t) && svEvents.Count > 1)
+                            {
+                                svEvents.RemoveAt(svEvents.Count - 1);
+                                lastEvent = svEvents[svEvents.Count - 1];
+                            }
+                            float currentIntegral = lastEvent.Integral + (t - lastEvent.Time) * lastEvent.Multiplier;
+                            svEvents.Add(new SVEvent(t, svValue, currentIntegral));
+                        }
+                        else warnings.Add(new ErrorPos("Invalid SV", token.Line, token.Range));
                         break;
 
                     case TokenType.Beats: // {<value>}
@@ -389,59 +453,68 @@ namespace Game
 
         void Update()
         {
-            UpdateMaxCombo();
-            CheckSongEnd();
-            UpdateScoreDisplay();
-            HandleInput();
-            HandleTargetVisibility(KeyCode.D, TargetNote_1);
-            HandleTargetVisibility(KeyCode.F, TargetNote_2);
-            HandleTargetVisibility(KeyCode.J, TargetNote_3);
-            HandleTargetVisibility(KeyCode.K, TargetNote_4);
-            HandleKeyPress();
-        }
-
-        void FixedUpdate()
-        {
             if (!isPause)
             {
                 UpdateSongTime();
                 UpdateNotes();
             }
+
+            UpdateMaxCombo();
+            CheckSongEnd();
+            UpdateScoreDisplay();
+            HandleInput();
+            HandleKeyPress();
         }
 
         void UpdateSongTime()
         {
-            songTime = BGM.GetComponent<AudioSource>().time;
-            songTimeOBJ.GetComponent<TextMeshProUGUI>().text = songTime.ToString();
+            if (!audioPlayed)
+            {
+                songTime += Time.deltaTime;
+                if (songTime >= 0f)
+                {
+                    BGM.GetComponent<AudioSource>().Play();
+                    audioPlayed = true;
+                }
+            }
+            else
+            {
+                songTime = BGM.GetComponent<AudioSource>().time;
+            }
+            songTimeOBJ.GetComponent<TextMeshProUGUI>().text = songTime.ToString("F2");
         }
 
         void UpdateNotes()
         {
             int index = 0;
+            float approachTime = 2f / Mathf.Max(0.1f, speed);
             foreach (var note in notes)
             {
                 index++;
                 float timeToSpawn = note.Time;
                 timeToSpawnOBJ.GetComponent<TextMeshProUGUI>().text = timeToSpawn.ToString();
-                if (songTime >= timeToSpawn - 2f && !noteSpawned[note])
+                
+                float integralDistToHit = GetIntegralFromZero(timeToSpawn) - GetIntegralFromZero(songTime);
+
+                if (integralDistToHit <= approachTime && !noteSpawned[note])
                 {
                     Debug.Log("Spawning note at lane: " + note.Lane);
-                    CreateNote(note.Lane);
+                    CreateNote(note.Lane, note.Time);
                     noteSpawned[note] = true;
                 }
                 else if (songTime >= timeToSpawn && !noteSpawned[note])
                 {
                     // 容錯機制，確保音符能夠準時生成
                     Debug.LogWarning("Late spawning note at lane: " + note.Lane);
-                    CreateNote(note.Lane);
+                    CreateNote(note.Lane, note.Time);
                     noteSpawned[note] = true;
                 }
             }
 
-            MoveNotes(_Note_1_List, TargetNote_1);
-            MoveNotes(_Note_2_List, TargetNote_2);
-            MoveNotes(_Note_3_List, TargetNote_3);
-            MoveNotes(_Note_4_List, TargetNote_4);
+            MoveNotes(_Note_1_List, _Note_1_Times, _Note_1_StartPos, TargetNote_1);
+            MoveNotes(_Note_2_List, _Note_2_Times, _Note_2_StartPos, TargetNote_2);
+            MoveNotes(_Note_3_List, _Note_3_Times, _Note_3_StartPos, TargetNote_3);
+            MoveNotes(_Note_4_List, _Note_4_Times, _Note_4_StartPos, TargetNote_4);
         }
 
         void UpdateMaxCombo()
@@ -566,7 +639,10 @@ namespace Game
                 }
                 else
                 {
-                    BGM.GetComponent<AudioSource>().UnPause();
+                    if (audioPlayed)
+                    {
+                        BGM.GetComponent<AudioSource>().UnPause();
+                    }
                 }
             }
         }
@@ -584,26 +660,33 @@ namespace Game
 
         IEnumerator StartSongPlaying()
         {
-            yield return new WaitForSeconds(1f);
-            BGM.GetComponent<AudioSource>().Play();
+            yield return null;
             playing = true;
             isPause = false;
         }
 
 
-        void MoveNotes(List<GameObject> noteList, GameObject target)
+        void MoveNotes(List<GameObject> noteList, List<float> timeList, List<Vector3> startPosList, GameObject target)
         {
+            float approachTime = 2f / Mathf.Max(0.1f, speed);
             for (int i = noteList.Count - 1; i >= 0; i--)
             {
                 if (noteList[i] != null && target != null)
                 {
-                    noteList[i].transform.position = Vector3.MoveTowards(noteList[i].transform.position, target.transform.position, speed * Time.deltaTime);
+                    float hitTime = timeList[i];
+                    float integralDistToHit = GetIntegralFromZero(hitTime) - GetIntegralFromZero(songTime);
+                    float progress = 1.0f - (integralDistToHit / approachTime);
+
+                    noteList[i].transform.position = Vector3.LerpUnclamped(startPosList[i], target.transform.position, progress);
+                    
                     JudgeTime.GetComponent<TextMeshProUGUI>().text = Mathf.Round(noteList[i].transform.position.y) + "/" + Mathf.Round(target.transform.position.y);
-                    // Destroy note if it reaches the target and remove it from the list
-                    if (Mathf.Round(noteList[i].transform.position.y) == Mathf.Round(target.transform.position.y))
+                    // Destroy note if it has passed the miss window
+                    if (songTime - hitTime > missWindow / 1000f)
                     {
                         Destroy(noteList[i]);
                         noteList.RemoveAt(i);
+                        timeList.RemoveAt(i);
+                        startPosList.RemoveAt(i);
                         DisplayJudgeResult(Judge_Miss);
                         countMiss++; // 增加 miss 計數
                         combo = 0; // 重置 combo 計數
@@ -619,63 +702,34 @@ namespace Game
             judge.SetActive(false);
         }
 
-        IEnumerator TestNote()
+        void CreateNote(int lane, float hitTime)
         {
-            for (; ; )
-            {
-                yield return new WaitForSeconds(.5f);
-                CreateNote(1);
-                yield return new WaitForSeconds(.5f);
-                CreateNote(2);
-                yield return new WaitForSeconds(.5f);
-                CreateNote(3);
-                yield return new WaitForSeconds(.5f);
-                CreateNote(4);
-            }
-
-
-        }
-
-        void HandleTargetVisibility(KeyCode key, GameObject target)
-        {
-            if (Input.GetKey(key))
-            {
-                target.SetActive(true);
-            }
-            else
-            {
-                target.SetActive(false);
-            }
-        }
-
-        void CreateNote(int note)
-        {
-            //Debug.Log(note);
+            //Debug.Log(lane);
             GameObject Canvas = GameObject.FindGameObjectWithTag("Canvas");
             GameObject TagNote = GameObject.FindGameObjectWithTag("TagNote");
             GameObject newNote = null;
 
-            switch (note)
+            switch (lane)
             {
                 case 1:
                     newNote = Instantiate(Note_1);
                     _Note_1_List.Add(newNote);
-                    _Note_1_Times.Add(Time.time); // Store the creation time of the note
+                    _Note_1_Times.Add(hitTime); // Store the target hit time
                     break;
                 case 2:
                     newNote = Instantiate(Note_2);
                     _Note_2_List.Add(newNote);
-                    _Note_2_Times.Add(Time.time);
+                    _Note_2_Times.Add(hitTime);
                     break;
                 case 3:
                     newNote = Instantiate(Note_3);
                     _Note_3_List.Add(newNote);
-                    _Note_3_Times.Add(Time.time);
+                    _Note_3_Times.Add(hitTime);
                     break;
                 case 4:
                     newNote = Instantiate(Note_4);
                     _Note_4_List.Add(newNote);
-                    _Note_4_Times.Add(Time.time);
+                    _Note_4_Times.Add(hitTime);
                     break;
             }
 
@@ -683,6 +737,14 @@ namespace Game
             {
                 newNote.SetActive(true);
                 newNote.transform.SetParent(TagNote.transform, false);
+                
+                switch (lane)
+                {
+                    case 1: _Note_1_StartPos.Add(newNote.transform.position); break;
+                    case 2: _Note_2_StartPos.Add(newNote.transform.position); break;
+                    case 3: _Note_3_StartPos.Add(newNote.transform.position); break;
+                    case 4: _Note_4_StartPos.Add(newNote.transform.position); break;
+                }
             }
         }
 
@@ -690,6 +752,7 @@ namespace Game
         {
             List<GameObject> currentNoteList = null;
             List<float> currentNoteTimes = null;
+            List<Vector3> currentStartPosList = null;
             GameObject target = null;
 
             switch (note)
@@ -697,21 +760,25 @@ namespace Game
                 case 1:
                     currentNoteList = _Note_1_List;
                     currentNoteTimes = _Note_1_Times;
+                    currentStartPosList = _Note_1_StartPos;
                     target = TargetNote_1;
                     break;
                 case 2:
                     currentNoteList = _Note_2_List;
                     currentNoteTimes = _Note_2_Times;
+                    currentStartPosList = _Note_2_StartPos;
                     target = TargetNote_2;
                     break;
                 case 3:
                     currentNoteList = _Note_3_List;
                     currentNoteTimes = _Note_3_Times;
+                    currentStartPosList = _Note_3_StartPos;
                     target = TargetNote_3;
                     break;
                 case 4:
                     currentNoteList = _Note_4_List;
                     currentNoteTimes = _Note_4_Times;
+                    currentStartPosList = _Note_4_StartPos;
                     target = TargetNote_4;
                     break;
             }
@@ -719,44 +786,24 @@ namespace Game
             if (currentNoteList != null && currentNoteList.Count > 0)
             {
                 GameObject noteObject = currentNoteList[0]; // Check the first note in the list
-                float noteTime = currentNoteTimes[0];
-                float timeDiff = Mathf.Abs(noteObject.transform.position.y - target.transform.position.y);
+                float targetTime = currentNoteTimes[0];
+                float timeDiffMS = Mathf.Abs(songTime - targetTime) * 1000f; // Calculate time difference in ms
 
-                if (timeDiff <= perfectWindow * 2)
+                if (timeDiffMS <= perfectWindow)
                 {
                     DisplayJudgeResult(Judge_Perfect);
                     countPerfect++;
                     combo++;
                     score += Mathf.CeilToInt((float)maxScore / totalNotes); // Perfect score
                 }
-                else if (timeDiff <= perfectWindow)
-                {
-                    DisplayJudgeResult(Judge_Perfect);
-                    countPerfect++;
-                    combo++;
-                    score += Mathf.CeilToInt((float)maxScore / totalNotes); // Perfect score
-                }
-                else if (timeDiff <= greatWindow * 2)
+                else if (timeDiffMS <= greatWindow)
                 {
                     DisplayJudgeResult(Judge_Great);
                     countGreat++;
                     combo++;
                     score += Mathf.CeilToInt((float)maxScore / totalNotes * 0.6f); // Great score
                 }
-                else if (timeDiff <= greatWindow)
-                {
-                    DisplayJudgeResult(Judge_Great);
-                    countGreat++;
-                    combo++;
-                    score += Mathf.CeilToInt((float)maxScore / totalNotes * 0.6f); // Great score
-                }
-                else if (timeDiff <= missWindow * 2)
-                {
-                    DisplayJudgeResult(Judge_Miss);
-                    countMiss++;
-                    combo = 0; // Reset combo on miss
-                }
-                else if (timeDiff <= missWindow)
+                else if (timeDiffMS <= missWindow)
                 {
                     DisplayJudgeResult(Judge_Miss);
                     countMiss++;
@@ -764,11 +811,11 @@ namespace Game
                 }
                 else
                 {
-                    JudgeTime.GetComponent<TextMeshProUGUI>().text = timeDiff.ToString();
+                    JudgeTime.GetComponent<TextMeshProUGUI>().text = timeDiffMS.ToString("F0") + "ms";
                     return;
                 }
 
-                JudgeTime.GetComponent<TextMeshProUGUI>().text = timeDiff.ToString();
+                JudgeTime.GetComponent<TextMeshProUGUI>().text = timeDiffMS.ToString("F0") + "ms";
 
                 // Play judge audio
                 JudgeAudio.GetComponent<AudioSource>().Play();
@@ -777,6 +824,7 @@ namespace Game
                 Destroy(noteObject);
                 currentNoteList.RemoveAt(0);
                 currentNoteTimes.RemoveAt(0);
+                currentStartPosList.RemoveAt(0);
             }
 
             // 確保分數不超過最大值
@@ -804,7 +852,10 @@ namespace Game
         {
             isPause = false;
             pause.SetActive(false);
-            BGM.GetComponent<AudioSource>().UnPause();
+            if (audioPlayed)
+            {
+                BGM.GetComponent<AudioSource>().UnPause();
+            }
         }
 
         public void RestartButton()

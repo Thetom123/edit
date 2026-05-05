@@ -151,6 +151,25 @@
                     "level": "狂"
                 }
             ]
+        },
+        {
+            "id": "GrievousLady",
+            "name": "Grievous Lady",
+            "artist": "Team Grimoire vs Laur",
+            "levels": [
+                {
+                    "diff": 0,
+                    "level": "8"
+                },
+                {
+                    "diff": 1,
+                    "level": "10"
+                },
+                {
+                    "diff": 2,
+                    "level": "11"
+                }
+            ]
         }
     ]
 }
