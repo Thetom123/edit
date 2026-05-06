@@ -113,7 +113,7 @@
                     "level": "舞"
                 }
             ]
-        } ,
+        },
         {
             "id": "ENDYMION",
             "name": "ENDYMION",
@@ -168,6 +168,25 @@
                 {
                     "diff": 2,
                     "level": "11"
+                }
+            ]
+        },
+        {
+            "id": "Spider's Thread",
+            "name": "Spider's Thread",
+            "artist": "きくお×cosMo＠暴走P feat.影縫英",
+            "levels": [
+                {
+                    "diff": 0,
+                    "level": "8"
+                },
+                {
+                    "diff": 1,
+                    "level": "10"
+                },
+                {
+                    "diff": 2,
+                    "level": "?"
                 }
             ]
         }

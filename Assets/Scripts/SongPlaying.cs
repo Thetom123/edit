@@ -24,6 +24,7 @@ namespace Game
             NewLine,    // \n
             Comment,    // # ...
             SV,         // [1.5]
+            HoldNote,   // 1h[4:4]
         }
 
         class SVEvent
@@ -101,11 +102,15 @@ namespace Game
         {
             public int Lane { get; }
             public float Time { get; }
+            public bool IsHold { get; }
+            public float EndTime { get; }
 
-            public Note(int lane, float time)
+            public Note(int lane, float time, bool isHold = false, float endTime = 0f)
             {
                 Lane = lane;
                 Time = time;
+                IsHold = isHold;
+                EndTime = endTime;
             }
         }
 
@@ -140,6 +145,24 @@ namespace Game
         private List<Vector3> _Note_2_StartPos = new List<Vector3>();
         private List<Vector3> _Note_3_StartPos = new List<Vector3>();
         private List<Vector3> _Note_4_StartPos = new List<Vector3>();
+
+        class HoldNoteObj
+        {
+            public GameObject Head;
+            public GameObject Tail;
+            public GameObject Body;
+            public float HitTime;
+            public float EndTime;
+            public bool HeadHit;
+            public bool IsDead;
+            public Vector3 HeadStartPos;
+            public Vector3 TailStartPos;
+        }
+
+        private List<HoldNoteObj> _HoldNote_1_List = new List<HoldNoteObj>();
+        private List<HoldNoteObj> _HoldNote_2_List = new List<HoldNoteObj>();
+        private List<HoldNoteObj> _HoldNote_3_List = new List<HoldNoteObj>();
+        private List<HoldNoteObj> _HoldNote_4_List = new List<HoldNoteObj>();
 
         public GameObject BGM;
 
@@ -218,7 +241,11 @@ namespace Game
                 noteSpawned[note] = false;
             }
 
-            totalNotes = notes.Count; // 計算總音符數量
+            totalNotes = 0;
+            foreach (var note in notes)
+            {
+                totalNotes += note.IsHold ? 2 : 1;
+            } // 計算總音符數量
             StartCoroutine(StartSongPlaying());
         }
 
@@ -344,7 +371,22 @@ namespace Game
 
                     default:
                         if (char.IsDigit(c))
+                        {
+                            if (i + 1 < input.Length && input[i + 1] == 'h')
+                            {
+                                int startBracket = input.IndexOf('[', i);
+                                int endBracket = input.IndexOf(']', i);
+                                if (startBracket == i + 2 && endBracket != -1)
+                                {
+                                    int len = endBracket - i + 1;
+                                    tokens.Add(new Token(TokenType.HoldNote, input.Substring(i, len), line, position, len));
+                                    i = endBracket;
+                                    position += len - 1;
+                                    continue;
+                                }
+                            }
                             tokens.Add(new Token(TokenType.Note, c.ToString(), line, position));
+                        }
                         else
                             warnings.Add(new ErrorPos("Invalid character", line, position));
                         break;
@@ -391,14 +433,21 @@ namespace Game
                         if (float.TryParse(token.Value, out float svValue))
                         {
                             float t = (float)currentTime;
-                            SVEvent lastEvent = svEvents[svEvents.Count - 1];
-                            if (Mathf.Approximately(lastEvent.Time, t) && svEvents.Count > 1)
+                            if (t == chartOffset && svEvents.Count == 1)
                             {
-                                svEvents.RemoveAt(svEvents.Count - 1);
-                                lastEvent = svEvents[svEvents.Count - 1];
+                                svEvents[0] = new SVEvent(-1000f, svValue, 0f);
                             }
-                            float currentIntegral = lastEvent.Integral + (t - lastEvent.Time) * lastEvent.Multiplier;
-                            svEvents.Add(new SVEvent(t, svValue, currentIntegral));
+                            else
+                            {
+                                SVEvent lastEvent = svEvents[svEvents.Count - 1];
+                                if (Mathf.Approximately(lastEvent.Time, t) && svEvents.Count > 1)
+                                {
+                                    svEvents.RemoveAt(svEvents.Count - 1);
+                                    lastEvent = svEvents[svEvents.Count - 1];
+                                }
+                                float currentIntegral = lastEvent.Integral + (t - lastEvent.Time) * lastEvent.Multiplier;
+                                svEvents.Add(new SVEvent(t, svValue, currentIntegral));
+                            }
                         }
                         else warnings.Add(new ErrorPos("Invalid SV", token.Line, token.Range));
                         break;
@@ -438,6 +487,32 @@ namespace Game
                         }
                         else
                             warnings.Add(new ErrorPos("Invalid note", token.Line, token.Range));
+                        break;
+
+                    case TokenType.HoldNote: // "1h[4:4]"
+                        string holdStr = token.Value;
+                        if (int.TryParse(holdStr[0].ToString(), out int hLane) && hLane >= 1 && hLane <= 4)
+                        {
+                            int colonIdx = holdStr.IndexOf(':');
+                            if (colonIdx != -1)
+                            {
+                                string xStr = holdStr.Substring(3, colonIdx - 3);
+                                string yStr = holdStr.Substring(colonIdx + 1, holdStr.Length - colonIdx - 2);
+                                if (decimal.TryParse(xStr, out decimal xVal) && decimal.TryParse(yStr, out decimal yVal) && xVal > 0)
+                                {
+                                    if (!currentNotes.Add(hLane))
+                                        warnings.Add(new ErrorPos("Duplicate note", token.Line, token.Range));
+                                    else
+                                    {
+                                        float duration = (float)(yVal * (60m / bpm) * (4m / xVal));
+                                        notes.Add(new Note(hLane, (float)currentTime, true, (float)currentTime + duration));
+                                    }
+                                }
+                                else warnings.Add(new ErrorPos("Invalid hold parameters", token.Line, token.Range));
+                            }
+                            else warnings.Add(new ErrorPos("Invalid hold syntax", token.Line, token.Range));
+                        }
+                        else warnings.Add(new ErrorPos("Invalid hold lane", token.Line, token.Range));
                         break;
 
                     default:
@@ -499,14 +574,16 @@ namespace Game
                 if (integralDistToHit <= approachTime && !noteSpawned[note])
                 {
                     Debug.Log("Spawning note at lane: " + note.Lane);
-                    CreateNote(note.Lane, note.Time);
+                    if (note.IsHold) CreateHoldNote(note.Lane, note.Time, note.EndTime);
+                    else CreateNote(note.Lane, note.Time);
                     noteSpawned[note] = true;
                 }
                 else if (songTime >= timeToSpawn && !noteSpawned[note])
                 {
                     // 容錯機制，確保音符能夠準時生成
                     Debug.LogWarning("Late spawning note at lane: " + note.Lane);
-                    CreateNote(note.Lane, note.Time);
+                    if (note.IsHold) CreateHoldNote(note.Lane, note.Time, note.EndTime);
+                    else CreateNote(note.Lane, note.Time);
                     noteSpawned[note] = true;
                 }
             }
@@ -515,6 +592,11 @@ namespace Game
             MoveNotes(_Note_2_List, _Note_2_Times, _Note_2_StartPos, TargetNote_2);
             MoveNotes(_Note_3_List, _Note_3_Times, _Note_3_StartPos, TargetNote_3);
             MoveNotes(_Note_4_List, _Note_4_Times, _Note_4_StartPos, TargetNote_4);
+
+            MoveHoldNotes(_HoldNote_1_List, TargetNote_1);
+            MoveHoldNotes(_HoldNote_2_List, TargetNote_2);
+            MoveHoldNotes(_HoldNote_3_List, TargetNote_3);
+            MoveHoldNotes(_HoldNote_4_List, TargetNote_4);
         }
 
         void UpdateMaxCombo()
@@ -651,10 +733,15 @@ namespace Game
         {
             for (int i = 0; i < keys.Length; i++)
             {
-                if (Input.GetKeyDown(keys[i]))
+                bool isKeyDown = Input.GetKeyDown(keys[i]);
+                bool isKey = Input.GetKey(keys[i]);
+
+                if (isKeyDown)
                 {
-                    HandleJudgment(i + 1);
+                    ProcessKeyDown(i + 1);
                 }
+                
+                ProcessKeyHold(i + 1, isKey);
             }
         }
 
@@ -748,89 +835,358 @@ namespace Game
             }
         }
 
-        void HandleJudgment(int note)
+        void ProcessKeyDown(int lane)
         {
-            List<GameObject> currentNoteList = null;
-            List<float> currentNoteTimes = null;
-            List<Vector3> currentStartPosList = null;
-            GameObject target = null;
+            List<GameObject> tapNotes = null;
+            List<float> tapTimes = null;
+            List<HoldNoteObj> holdNotes = null;
+            List<Vector3> tapStartPos = null;
 
-            switch (note)
+            switch (lane)
             {
-                case 1:
-                    currentNoteList = _Note_1_List;
-                    currentNoteTimes = _Note_1_Times;
-                    currentStartPosList = _Note_1_StartPos;
-                    target = TargetNote_1;
-                    break;
-                case 2:
-                    currentNoteList = _Note_2_List;
-                    currentNoteTimes = _Note_2_Times;
-                    currentStartPosList = _Note_2_StartPos;
-                    target = TargetNote_2;
-                    break;
-                case 3:
-                    currentNoteList = _Note_3_List;
-                    currentNoteTimes = _Note_3_Times;
-                    currentStartPosList = _Note_3_StartPos;
-                    target = TargetNote_3;
-                    break;
-                case 4:
-                    currentNoteList = _Note_4_List;
-                    currentNoteTimes = _Note_4_Times;
-                    currentStartPosList = _Note_4_StartPos;
-                    target = TargetNote_4;
-                    break;
+                case 1: tapNotes = _Note_1_List; tapTimes = _Note_1_Times; tapStartPos = _Note_1_StartPos; holdNotes = _HoldNote_1_List; break;
+                case 2: tapNotes = _Note_2_List; tapTimes = _Note_2_Times; tapStartPos = _Note_2_StartPos; holdNotes = _HoldNote_2_List; break;
+                case 3: tapNotes = _Note_3_List; tapTimes = _Note_3_Times; tapStartPos = _Note_3_StartPos; holdNotes = _HoldNote_3_List; break;
+                case 4: tapNotes = _Note_4_List; tapTimes = _Note_4_Times; tapStartPos = _Note_4_StartPos; holdNotes = _HoldNote_4_List; break;
             }
 
+            float earliestTap = float.MaxValue;
+            if (tapTimes != null && tapTimes.Count > 0) earliestTap = tapTimes[0];
+
+            float earliestHold = float.MaxValue;
+            HoldNoteObj targetHold = null;
+            if (holdNotes != null)
+            {
+                foreach (var h in holdNotes)
+                {
+                    if (!h.HeadHit && !h.IsDead)
+                    {
+                        earliestHold = h.HitTime;
+                        targetHold = h;
+                        break;
+                    }
+                }
+            }
+
+            if (earliestTap <= earliestHold && earliestTap != float.MaxValue)
+            {
+                bool hit = TryHitTap(tapNotes, tapTimes, tapStartPos);
+                if (!hit && targetHold != null) TryHitHoldHead(targetHold);
+            }
+            else if (targetHold != null)
+            {
+                bool hit = TryHitHoldHead(targetHold);
+                if (!hit && earliestTap != float.MaxValue) TryHitTap(tapNotes, tapTimes, tapStartPos);
+            }
+        }
+
+        bool TryHitTap(List<GameObject> currentNoteList, List<float> currentNoteTimes, List<Vector3> currentStartPosList)
+        {
             if (currentNoteList != null && currentNoteList.Count > 0)
             {
-                GameObject noteObject = currentNoteList[0]; // Check the first note in the list
+                GameObject noteObject = currentNoteList[0];
                 float targetTime = currentNoteTimes[0];
-                float timeDiffMS = Mathf.Abs(songTime - targetTime) * 1000f; // Calculate time difference in ms
+                float timeDiffMS = Mathf.Abs(songTime - targetTime) * 1000f;
 
                 if (timeDiffMS <= perfectWindow)
                 {
                     DisplayJudgeResult(Judge_Perfect);
                     countPerfect++;
                     combo++;
-                    score += Mathf.CeilToInt((float)maxScore / totalNotes); // Perfect score
+                    score += Mathf.CeilToInt((float)maxScore / totalNotes);
                 }
                 else if (timeDiffMS <= greatWindow)
                 {
                     DisplayJudgeResult(Judge_Great);
                     countGreat++;
                     combo++;
-                    score += Mathf.CeilToInt((float)maxScore / totalNotes * 0.6f); // Great score
+                    score += Mathf.CeilToInt((float)maxScore / totalNotes * 0.6f);
                 }
                 else if (timeDiffMS <= missWindow)
                 {
                     DisplayJudgeResult(Judge_Miss);
                     countMiss++;
-                    combo = 0; // Reset combo on miss
+                    combo = 0;
                 }
                 else
                 {
                     JudgeTime.GetComponent<TextMeshProUGUI>().text = timeDiffMS.ToString("F0") + "ms";
-                    return;
+                    return false;
                 }
 
                 JudgeTime.GetComponent<TextMeshProUGUI>().text = timeDiffMS.ToString("F0") + "ms";
-
-                // Play judge audio
                 JudgeAudio.GetComponent<AudioSource>().Play();
-
-                // Remove note from list and destroy it
                 Destroy(noteObject);
                 currentNoteList.RemoveAt(0);
                 currentNoteTimes.RemoveAt(0);
                 currentStartPosList.RemoveAt(0);
+                
+                if (score > maxScore) score = maxScore;
+                return true;
+            }
+            return false;
+        }
+
+        bool TryHitHoldHead(HoldNoteObj hold)
+        {
+            float timeDiffMS = Mathf.Abs(songTime - hold.HitTime) * 1000f;
+            if (timeDiffMS <= greatWindow)
+            {
+                hold.HeadHit = true;
+                if (hold.Head != null) hold.Head.SetActive(false); // Hide head
+                
+                if (timeDiffMS <= perfectWindow)
+                {
+                    DisplayJudgeResult(Judge_Perfect);
+                    countPerfect++;
+                }
+                else
+                {
+                    DisplayJudgeResult(Judge_Great);
+                    countGreat++;
+                }
+                combo++;
+                score += Mathf.CeilToInt((float)maxScore / totalNotes);
+                JudgeTime.GetComponent<TextMeshProUGUI>().text = timeDiffMS.ToString("F0") + "ms";
+                JudgeAudio.GetComponent<AudioSource>().Play();
+                if (score > maxScore) score = maxScore;
+                return true;
+            }
+            return false;
+        }
+
+        void ProcessKeyHold(int lane, bool isKey)
+        {
+            List<HoldNoteObj> currentList = null;
+            switch (lane)
+            {
+                case 1: currentList = _HoldNote_1_List; break;
+                case 2: currentList = _HoldNote_2_List; break;
+                case 3: currentList = _HoldNote_3_List; break;
+                case 4: currentList = _HoldNote_4_List; break;
             }
 
-            // 確保分數不超過最大值
-            if (score > maxScore)
+            if (currentList == null) return;
+
+            for (int i = 0; i < currentList.Count; i++)
             {
-                score = maxScore;
+                HoldNoteObj hold = currentList[i];
+                if (hold.IsDead) continue;
+
+                if (hold.HeadHit)
+                {
+                    if (!isKey && songTime < hold.EndTime)
+                    {
+                        // Released early -> Miss
+                        hold.IsDead = true;
+                        TurnHoldBlack(hold);
+                        DisplayJudgeResult(Judge_Miss);
+                        countMiss++;
+                        combo = 0;
+                        UpdateScoreDisplay();
+                        continue;
+                    }
+                    
+                    if (isKey && songTime >= hold.EndTime)
+                    {
+                        // Successfully held to end
+                        if (hold.Head != null) Destroy(hold.Head);
+                        if (hold.Tail != null) Destroy(hold.Tail);
+                        if (hold.Body != null) Destroy(hold.Body);
+                        currentList.RemoveAt(i);
+                        
+                        DisplayJudgeResult(Judge_Perfect);
+                        countPerfect++;
+                        combo++;
+                        score += Mathf.CeilToInt((float)maxScore / totalNotes);
+                        UpdateScoreDisplay();
+                        JudgeAudio.GetComponent<AudioSource>().Play();
+                        if (score > maxScore) score = maxScore;
+                        i--;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        void TurnHoldBlack(HoldNoteObj hold)
+        {
+            if (hold.Head != null)
+            {
+                var img = hold.Head.GetComponent<Image>();
+                if (img != null) img.color = new Color(0.3f, 0.3f, 0.3f, img.color.a);
+                else
+                {
+                    var sr = hold.Head.GetComponent<SpriteRenderer>();
+                    if (sr != null) sr.color = new Color(0.3f, 0.3f, 0.3f, sr.color.a);
+                }
+            }
+            if (hold.Tail != null)
+            {
+                var img = hold.Tail.GetComponent<Image>();
+                if (img != null) img.color = new Color(0.3f, 0.3f, 0.3f, img.color.a);
+                else
+                {
+                    var sr = hold.Tail.GetComponent<SpriteRenderer>();
+                    if (sr != null) sr.color = new Color(0.3f, 0.3f, 0.3f, sr.color.a);
+                }
+            }
+            if (hold.Body != null)
+            {
+                var img = hold.Body.GetComponent<Image>();
+                if (img != null) img.color = new Color(0.3f, 0.3f, 0.3f, img.color.a);
+                else
+                {
+                    var sr = hold.Body.GetComponent<SpriteRenderer>();
+                    if (sr != null) sr.color = new Color(0.3f, 0.3f, 0.3f, sr.color.a);
+                }
+            }
+        }
+
+        void CreateHoldNote(int lane, float hitTime, float endTime)
+        {
+            GameObject TagNote = GameObject.FindGameObjectWithTag("TagNote");
+            GameObject baseNotePref = null;
+            List<HoldNoteObj> currentList = null;
+
+            switch (lane)
+            {
+                case 1: baseNotePref = Note_1; currentList = _HoldNote_1_List; break;
+                case 2: baseNotePref = Note_2; currentList = _HoldNote_2_List; break;
+                case 3: baseNotePref = Note_3; currentList = _HoldNote_3_List; break;
+                case 4: baseNotePref = Note_4; currentList = _HoldNote_4_List; break;
+            }
+
+            if (baseNotePref != null && currentList != null)
+            {
+                HoldNoteObj holdObj = new HoldNoteObj();
+                holdObj.HitTime = hitTime;
+                holdObj.EndTime = endTime;
+                holdObj.HeadHit = false;
+
+                holdObj.Head = Instantiate(baseNotePref);
+                holdObj.Head.SetActive(true);
+                holdObj.Head.transform.SetParent(TagNote.transform, false);
+                holdObj.HeadStartPos = holdObj.Head.transform.position;
+
+                holdObj.Tail = Instantiate(baseNotePref);
+                holdObj.Tail.SetActive(true);
+                holdObj.Tail.transform.SetParent(TagNote.transform, false);
+                holdObj.TailStartPos = holdObj.Tail.transform.position;
+
+                holdObj.Body = new GameObject("HoldBody");
+                holdObj.Body.transform.SetParent(TagNote.transform, false);
+                
+                Image headImg = holdObj.Head.GetComponent<Image>();
+                if (headImg != null)
+                {
+                    Image bodyImg = holdObj.Body.AddComponent<Image>();
+                    bodyImg.sprite = headImg.sprite;
+                    bodyImg.color = new Color(1f, 1f, 1f, 0.5f);
+                    holdObj.Body.transform.SetSiblingIndex(0);
+                    RectTransform rect = holdObj.Body.GetComponent<RectTransform>();
+                    rect.sizeDelta = new Vector2(headImg.rectTransform.sizeDelta.x * 0.8f, rect.sizeDelta.y);
+                }
+                else 
+                {
+                    SpriteRenderer headSr = holdObj.Head.GetComponent<SpriteRenderer>();
+                    if (headSr != null)
+                    {
+                        SpriteRenderer bodySr = holdObj.Body.AddComponent<SpriteRenderer>();
+                        bodySr.sprite = headSr.sprite;
+                        bodySr.color = new Color(1f, 1f, 1f, 0.5f);
+                        bodySr.sortingOrder = headSr.sortingOrder - 1;
+                        holdObj.Body.transform.localScale = new Vector3(0.8f, 1f, 1f);
+                    }
+                }
+
+                currentList.Add(holdObj);
+            }
+        }
+
+        void MoveHoldNotes(List<HoldNoteObj> noteList, GameObject target)
+        {
+            float approachTime = 2f / Mathf.Max(0.1f, speed);
+            for (int i = noteList.Count - 1; i >= 0; i--)
+            {
+                HoldNoteObj hold = noteList[i];
+
+                if (songTime - hold.EndTime > missWindow / 1000f)
+                {
+                    if (hold.Head != null) Destroy(hold.Head);
+                    if (hold.Tail != null) Destroy(hold.Tail);
+                    if (hold.Body != null) Destroy(hold.Body);
+                    
+                    if (hold.IsDead && !hold.HeadHit)
+                    {
+                        DisplayJudgeResult(Judge_Miss);
+                        countMiss++;
+                        combo = 0;
+                        UpdateScoreDisplay();
+                    }
+
+                    noteList.RemoveAt(i);
+                    continue;
+                }
+
+                if (target != null)
+                {
+                    if (!hold.HeadHit)
+                    {
+                        float headIntegralDist = GetIntegralFromZero(hold.HitTime) - GetIntegralFromZero(songTime);
+                        float headProgress = 1.0f - (headIntegralDist / approachTime);
+                        if (hold.Head != null)
+                            hold.Head.transform.position = Vector3.LerpUnclamped(hold.HeadStartPos, target.transform.position, headProgress);
+                        
+                        if (!hold.IsDead && songTime - hold.HitTime > missWindow / 1000f)
+                        {
+                            hold.IsDead = true;
+                            TurnHoldBlack(hold);
+                            DisplayJudgeResult(Judge_Miss);
+                            countMiss++;
+                            combo = 0;
+                            UpdateScoreDisplay();
+                            continue;
+                        }
+                    }
+                    else if (hold.Head != null)
+                    {
+                        hold.Head.transform.position = target.transform.position;
+                    }
+
+                    float tailIntegralDist = GetIntegralFromZero(hold.EndTime) - GetIntegralFromZero(songTime);
+                    float tailProgress = 1.0f - (tailIntegralDist / approachTime);
+                    if (hold.Tail != null)
+                    {
+                        hold.Tail.transform.position = Vector3.LerpUnclamped(hold.TailStartPos, target.transform.position, tailProgress);
+                    }
+
+                    if (hold.Body != null && hold.Head != null && hold.Tail != null)
+                    {
+                        Vector3 headPos = hold.Head.transform.position;
+                        Vector3 tailPos = hold.Tail.transform.position;
+                        
+                        Image bodyImg = hold.Body.GetComponent<Image>();
+                        if (bodyImg != null)
+                        {
+                            RectTransform bodyRect = hold.Body.GetComponent<RectTransform>();
+                            bodyRect.position = (headPos + tailPos) / 2f;
+                            float height = Mathf.Abs(headPos.y - tailPos.y) / bodyRect.lossyScale.y;
+                            bodyRect.sizeDelta = new Vector2(bodyRect.sizeDelta.x, height);
+                        }
+                        else
+                        {
+                            hold.Body.transform.position = (headPos + tailPos) / 2f;
+                            float dist = Mathf.Abs(headPos.y - tailPos.y);
+                            SpriteRenderer headSr = hold.Head.GetComponent<SpriteRenderer>();
+                            if (headSr != null && headSr.sprite != null)
+                            {
+                                float spriteHeight = headSr.sprite.bounds.size.y;
+                                hold.Body.transform.localScale = new Vector3(0.8f, dist / spriteHeight, 1f);
+                            }
+                        }
+                    }
+                }
             }
         }
 
