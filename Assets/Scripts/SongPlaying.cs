@@ -146,6 +146,17 @@ namespace Game
         private List<Vector3> _Note_3_StartPos = new List<Vector3>();
         private List<Vector3> _Note_4_StartPos = new List<Vector3>();
 
+        class DeadNoteObj
+        {
+            public GameObject Note;
+            public float HitTime;
+            public Vector3 StartPos;
+            public GameObject Target;
+            public float Progress;
+            public float FallSpeed;
+        }
+        private List<DeadNoteObj> _DeadNotes = new List<DeadNoteObj>();
+
         class HoldNoteObj
         {
             public GameObject Head;
@@ -154,9 +165,14 @@ namespace Game
             public float HitTime;
             public float EndTime;
             public bool HeadHit;
+            public bool TailHit;
             public bool IsDead;
+            public bool TailMissTriggered;
             public Vector3 HeadStartPos;
             public Vector3 TailStartPos;
+            public float HeadProgress;
+            public float TailProgress;
+            public float FallSpeed;
         }
 
         private List<HoldNoteObj> _HoldNote_1_List = new List<HoldNoteObj>();
@@ -194,6 +210,18 @@ namespace Game
                 else break;
             }
             return lastEvent.Integral + (t - lastEvent.Time) * lastEvent.Multiplier;
+        }
+
+        float GetCurrentSVMultiplier(float t)
+        {
+            if (svEvents.Count == 0) return 1.0f;
+            SVEvent lastEvent = svEvents[0];
+            for (int i = 1; i < svEvents.Count; i++)
+            {
+                if (svEvents[i].Time <= t) lastEvent = svEvents[i];
+                else break;
+            }
+            return lastEvent.Multiplier;
         }
 
         int countPerfect = 0, countGreat = 0, countMiss = 0, combo = 0;
@@ -554,7 +582,13 @@ namespace Game
             }
             else
             {
-                songTime = BGM.GetComponent<AudioSource>().time;
+                songTime += Time.deltaTime;
+                float audioTime = BGM.GetComponent<AudioSource>().time;
+                // 平滑修正時間誤差，避免直接使用 audioTime 造成的視覺抖動
+                if (Mathf.Abs(audioTime - songTime) > 0.05f)
+                {
+                    songTime = Mathf.Lerp(songTime, audioTime, Time.deltaTime * 10f);
+                }
             }
             songTimeOBJ.GetComponent<TextMeshProUGUI>().text = songTime.ToString("F2");
         }
@@ -597,6 +631,8 @@ namespace Game
             MoveHoldNotes(_HoldNote_2_List, TargetNote_2);
             MoveHoldNotes(_HoldNote_3_List, TargetNote_3);
             MoveHoldNotes(_HoldNote_4_List, TargetNote_4);
+
+            MoveDeadNotes();
         }
 
         void UpdateMaxCombo()
@@ -767,18 +803,49 @@ namespace Game
                     noteList[i].transform.position = Vector3.LerpUnclamped(startPosList[i], target.transform.position, progress);
                     
                     JudgeTime.GetComponent<TextMeshProUGUI>().text = Mathf.Round(noteList[i].transform.position.y) + "/" + Mathf.Round(target.transform.position.y);
-                    // Destroy note if it has passed the miss window
+                    // Trigger miss exactly at miss window but don't destroy yet
                     if (songTime - hitTime > missWindow / 1000f)
                     {
-                        Destroy(noteList[i]);
+                        float currentSV = Mathf.Max(1.0f, GetCurrentSVMultiplier(songTime));
+                        _DeadNotes.Add(new DeadNoteObj { Note = noteList[i], HitTime = hitTime, StartPos = startPosList[i], Target = target, Progress = progress, FallSpeed = currentSV });
+                        
+                        Color deadColor = new Color(0.3f, 0.3f, 0.3f, 1f);
+                        var img = noteList[i].GetComponent<Image>();
+                        if (img != null) { deadColor.a = img.color.a; img.color = deadColor; }
+                        else { var sr = noteList[i].GetComponent<SpriteRenderer>(); if (sr != null) { deadColor.a = sr.color.a; sr.color = deadColor; } }
+
                         noteList.RemoveAt(i);
                         timeList.RemoveAt(i);
                         startPosList.RemoveAt(i);
                         DisplayJudgeResult(Judge_Miss);
                         countMiss++; // 增加 miss 計數
                         combo = 0; // 重置 combo 計數
-
+                        UpdateScoreDisplay();
                     }
+                }
+            }
+        }
+
+        void MoveDeadNotes()
+        {
+            float approachTime = 2f / Mathf.Max(0.1f, speed);
+            for (int i = _DeadNotes.Count - 1; i >= 0; i--)
+            {
+                DeadNoteObj dead = _DeadNotes[i];
+                if (dead.Note == null || dead.Target == null)
+                {
+                    _DeadNotes.RemoveAt(i);
+                    continue;
+                }
+
+                dead.Progress += (dead.FallSpeed * Time.deltaTime) / approachTime;
+
+                dead.Note.transform.position = Vector3.LerpUnclamped(dead.StartPos, dead.Target.transform.position, dead.Progress);
+
+                if (dead.Progress > 1.5f) // Has moved significantly past the target
+                {
+                    Destroy(dead.Note);
+                    _DeadNotes.RemoveAt(i);
                 }
             }
         }
@@ -975,10 +1042,21 @@ namespace Game
 
                 if (hold.HeadHit)
                 {
-                    if (!isKey && songTime < hold.EndTime)
+                    float duration = hold.EndTime - hold.HitTime;
+                    float thresholdTime = hold.HitTime + duration * 0.8f;
+
+                    if (hold.TailHit) continue; // Already successfully held to 80%
+
+                    if (!isKey && songTime < thresholdTime)
                     {
                         // Released early -> Miss
                         hold.IsDead = true;
+                        float approachTime = 2f / Mathf.Max(0.1f, speed);
+                        float tailIntegralDist = GetIntegralFromZero(hold.EndTime) - GetIntegralFromZero(songTime);
+                        hold.TailProgress = 1.0f - (tailIntegralDist / approachTime);
+                        hold.HeadProgress = 1.0f; // Head already hit
+                        hold.FallSpeed = Mathf.Max(1.0f, GetCurrentSVMultiplier(songTime));
+
                         TurnHoldBlack(hold);
                         DisplayJudgeResult(Judge_Miss);
                         countMiss++;
@@ -987,23 +1065,18 @@ namespace Game
                         continue;
                     }
                     
-                    if (isKey && songTime >= hold.EndTime)
+                    if (songTime >= thresholdTime)
                     {
-                        // Successfully held to end
-                        if (hold.Head != null) Destroy(hold.Head);
-                        if (hold.Tail != null) Destroy(hold.Tail);
-                        if (hold.Body != null) Destroy(hold.Body);
-                        currentList.RemoveAt(i);
+                        // Successfully held to 80%
+                        hold.TailHit = true;
                         
                         DisplayJudgeResult(Judge_Perfect);
                         countPerfect++;
                         combo++;
                         score += Mathf.CeilToInt((float)maxScore / totalNotes);
                         UpdateScoreDisplay();
-                        JudgeAudio.GetComponent<AudioSource>().Play();
                         if (score > maxScore) score = maxScore;
-                        i--;
-                        continue;
+                        // Audio and visual destruction are handled in MoveHoldNotes at EndTime
                     }
                 }
             }
@@ -1110,21 +1183,42 @@ namespace Game
             for (int i = noteList.Count - 1; i >= 0; i--)
             {
                 HoldNoteObj hold = noteList[i];
+                
+                if (hold.IsDead)
+                {
+                    hold.HeadProgress += (hold.FallSpeed * Time.deltaTime) / approachTime;
+                    hold.TailProgress += (hold.FallSpeed * Time.deltaTime) / approachTime;
+                }
+                else
+                {
+                    float tailIntegralDist = GetIntegralFromZero(hold.EndTime) - GetIntegralFromZero(songTime);
+                    hold.TailProgress = 1.0f - (tailIntegralDist / approachTime);
+                    
+                    float headIntegralDist = GetIntegralFromZero(hold.HitTime) - GetIntegralFromZero(songTime);
+                    hold.HeadProgress = 1.0f - (headIntegralDist / approachTime);
+                }
 
                 if (songTime - hold.EndTime > missWindow / 1000f)
                 {
-                    if (hold.Head != null) Destroy(hold.Head);
-                    if (hold.Tail != null) Destroy(hold.Tail);
-                    if (hold.Body != null) Destroy(hold.Body);
-                    
-                    if (hold.IsDead && !hold.HeadHit)
+                    if (hold.IsDead && !hold.HeadHit && !hold.TailMissTriggered)
                     {
+                        hold.TailMissTriggered = true;
                         DisplayJudgeResult(Judge_Miss);
                         countMiss++;
                         combo = 0;
                         UpdateScoreDisplay();
                     }
+                }
 
+                if (hold.TailProgress > 1.5f || (hold.TailHit && songTime >= hold.EndTime))
+                {
+                    if (hold.TailHit && songTime >= hold.EndTime)
+                    {
+                        JudgeAudio.GetComponent<AudioSource>().Play();
+                    }
+                    if (hold.Head != null) Destroy(hold.Head);
+                    if (hold.Tail != null) Destroy(hold.Tail);
+                    if (hold.Body != null) Destroy(hold.Body);
                     noteList.RemoveAt(i);
                     continue;
                 }
@@ -1133,14 +1227,18 @@ namespace Game
                 {
                     if (!hold.HeadHit)
                     {
-                        float headIntegralDist = GetIntegralFromZero(hold.HitTime) - GetIntegralFromZero(songTime);
-                        float headProgress = 1.0f - (headIntegralDist / approachTime);
                         if (hold.Head != null)
-                            hold.Head.transform.position = Vector3.LerpUnclamped(hold.HeadStartPos, target.transform.position, headProgress);
+                            hold.Head.transform.position = Vector3.LerpUnclamped(hold.HeadStartPos, target.transform.position, hold.HeadProgress);
                         
                         if (!hold.IsDead && songTime - hold.HitTime > missWindow / 1000f)
                         {
                             hold.IsDead = true;
+                            float headDist = GetIntegralFromZero(hold.HitTime) - GetIntegralFromZero(songTime);
+                            hold.HeadProgress = 1.0f - (headDist / approachTime);
+                            float tailDist = GetIntegralFromZero(hold.EndTime) - GetIntegralFromZero(songTime);
+                            hold.TailProgress = 1.0f - (tailDist / approachTime);
+                            hold.FallSpeed = Mathf.Max(1.0f, GetCurrentSVMultiplier(songTime));
+
                             TurnHoldBlack(hold);
                             DisplayJudgeResult(Judge_Miss);
                             countMiss++;
@@ -1154,11 +1252,9 @@ namespace Game
                         hold.Head.transform.position = target.transform.position;
                     }
 
-                    float tailIntegralDist = GetIntegralFromZero(hold.EndTime) - GetIntegralFromZero(songTime);
-                    float tailProgress = 1.0f - (tailIntegralDist / approachTime);
                     if (hold.Tail != null)
                     {
-                        hold.Tail.transform.position = Vector3.LerpUnclamped(hold.TailStartPos, target.transform.position, tailProgress);
+                        hold.Tail.transform.position = Vector3.LerpUnclamped(hold.TailStartPos, target.transform.position, hold.TailProgress);
                     }
 
                     if (hold.Body != null && hold.Head != null && hold.Tail != null)
