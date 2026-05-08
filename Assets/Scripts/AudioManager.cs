@@ -13,9 +13,8 @@ public class AudioManager : MonoBehaviour
     private float previousVolume;
     private string savePath;
     private bool isMuted;
-    private bool isToggling;
 
-    private AudioSource _audioSource;
+    private bool isToggling;
 
     [System.Serializable]
     public class AudioSettings
@@ -31,9 +30,8 @@ public class AudioManager : MonoBehaviour
         LoadAudioSettings();
         audioSlider.onValueChanged.AddListener(delegate { OnVolumeChange(); });
         audioButton.onClick.AddListener(delegate { ToggleMute(); });
-        _audioSource = GetComponent<AudioSource>();
-        _audioSource.volume = audioVolume;
     }
+
 
     void OnVolumeChange()
     {
@@ -52,8 +50,9 @@ public class AudioManager : MonoBehaviour
         audioVolume = audioSlider.value;
         UpdateAudioIcon();
         SaveAudioSettings();
-        // 這裡可以添加代碼來設置實際的音量，例如：
-        // AudioListener.volume = audioVolume;
+        
+        // 設置實際的音量
+        AudioListener.volume = audioVolume;
     }
 
     void UpdateAudioIcon()
@@ -92,6 +91,7 @@ public class AudioManager : MonoBehaviour
             isMuted = settings.isMuted;
             audioSlider.value = audioVolume;
             UpdateAudioIcon();
+            AudioListener.volume = isMuted ? 0 : audioVolume;
         }
     }
 
@@ -122,7 +122,8 @@ public class AudioManager : MonoBehaviour
 
         // 重置防重複點擊標誌
         isToggling = false;
-        // 這裡可以添加代碼來設置實際的音量，例如：
-        // AudioListener.volume = isMuted ? 0 : audioVolume;
+        
+        // 設置實際的音量
+        AudioListener.volume = isMuted ? 0 : audioVolume;
     }
 }

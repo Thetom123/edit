@@ -1134,6 +1134,7 @@ GameObject:
   m_Component:
   - component: {fileID: 421946579}
   - component: {fileID: 421946581}
+  - component: {fileID: 421946580}
   m_Layer: 5
   m_Name: slider_Speed
   m_TagString: Untagged
@@ -1163,6 +1164,23 @@ RectTransform:
   m_AnchoredPosition: {x: -128, y: 71.32802}
   m_SizeDelta: {x: 160, y: 20}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &421946580
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 421946578}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0f160fe158dc7a949a58367d001b1e5e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  audioSlider: {fileID: 421946581}
+  audioButton: {fileID: 1028552425}
+  Audio100: {fileID: 21300000, guid: b35afc4418b386c4b9b35f6eccfcc5b1, type: 3}
+  Audio60: {fileID: 21300000, guid: 20b950c47c68b33488756fcc5fb0c88b, type: 3}
+  Audio0: {fileID: 21300000, guid: 5699360b6fdf46147b49e586926d4864, type: 3}
 --- !u!114 &421946581
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1214,7 +1232,7 @@ MonoBehaviour:
   m_OnValueChanged:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 0}
+      - m_Target: {fileID: 421946580}
         m_TargetAssemblyTypeName: AudioManager, Assembly-CSharp
         m_MethodName: ValueChangeCheck
         m_Mode: 1

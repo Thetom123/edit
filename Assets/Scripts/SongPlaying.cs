@@ -240,6 +240,25 @@ namespace Game
 
         void Start()
         {
+            // Load speed setting
+            string speedSavePath = System.IO.Path.Combine(Application.persistentDataPath, "speedSettings.json");
+            if (System.IO.File.Exists(speedSavePath))
+            {
+                try
+                {
+                    string json = System.IO.File.ReadAllText(speedSavePath);
+                    SpeedManager.SpeedSettings settings = JsonUtility.FromJson<SpeedManager.SpeedSettings>(json);
+                    if (settings.speed >= 1.0f && settings.speed <= 6.5f)
+                    {
+                        speed = settings.speed;
+                    }
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning("Failed to load speed settings: " + e.Message);
+                }
+            }
+
             playing = false;
             KeyManager keyManager = new KeyManager();
             keys = keyManager.GetKeyCodes();
