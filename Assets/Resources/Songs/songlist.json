@@ -1,4 +1,4 @@
-{
+﻿{
     "songs": [
         {
             "id": "metronome",
@@ -7,15 +7,18 @@
             "levels": [
                 {
                     "diff": 0,
-                    "level": 8
+                    "level": 8,
+                    "event": 0
                 },
                 {
                     "diff": 1,
-                    "level": 10
+                    "level": 10,
+                    "event": 0
                 },
                 {
                     "diff": 2,
-                    "level": "9+"
+                    "level": "9+",
+                    "event": 0
                 }
             ]
         },
@@ -26,15 +29,18 @@
             "levels": [
                 {
                     "diff": 0,
-                    "level": 8
+                    "level": 8,
+                    "event": 0
                 },
                 {
                     "diff": 1,
-                    "level": 10
+                    "level": 10,
+                    "event": 0
                 },
                 {
                     "diff": 2,
-                    "level": "9+"
+                    "level": "9+",
+                    "event": 0
                 }
             ]
         },
@@ -45,15 +51,18 @@
             "levels": [
                 {
                     "diff": 0,
-                    "level": 8
+                    "level": 8,
+                    "event": 0
                 },
                 {
                     "diff": 1,
-                    "level": 10
+                    "level": 10,
+                    "event": 0
                 },
                 {
                     "diff": 2,
-                    "level": 10
+                    "level": 10,
+                    "event": 0
                 }
             ]
         },
@@ -64,15 +73,18 @@
             "levels": [
                 {
                     "diff": 0,
-                    "level": 8
+                    "level": 8,
+                    "event": 0
                 },
                 {
                     "diff": 1,
-                    "level": 10
+                    "level": 10,
+                    "event": 0
                 },
                 {
                     "diff": 2,
-                    "level": 3
+                    "level": 3,
+                    "event": 0
                 }
             ]
         },
@@ -83,15 +95,18 @@
             "levels": [
                 {
                     "diff": 0,
-                    "level": 8
+                    "level": 8,
+                    "event": 0
                 },
                 {
                     "diff": 1,
-                    "level": 10
+                    "level": 10,
+                    "event": 0
                 },
                 {
                     "diff": 2,
-                    "level": 6
+                    "level": 6,
+                    "event": 0
                 }
             ]
         },
@@ -102,15 +117,18 @@
             "levels": [
                 {
                     "diff": 0,
-                    "level": 8
+                    "level": 8,
+                    "event": 0
                 },
                 {
                     "diff": 1,
-                    "level": 10
+                    "level": 10,
+                    "event": 0
                 },
                 {
                     "diff": 2,
-                    "level": "舞"
+                    "level": "舞",
+                    "event": 0
                 }
             ]
         },
@@ -121,15 +139,18 @@
             "levels": [
                 {
                     "diff": 0,
-                    "level": 8
+                    "level": 8,
+                    "event": 0
                 },
                 {
                     "diff": 1,
-                    "level": 10
+                    "level": 10,
+                    "event": 0
                 },
                 {
                     "diff": 2,
-                    "level": "招"
+                    "level": "招",
+                    "event": 1
                 }
             ]
         },
@@ -140,15 +161,18 @@
             "levels": [
                 {
                     "diff": 0,
-                    "level": 8
+                    "level": 8,
+                    "event": 0
                 },
                 {
                     "diff": 1,
-                    "level": 10
+                    "level": 10,
+                    "event": 0
                 },
                 {
                     "diff": 2,
-                    "level": "狂"
+                    "level": "狂",
+                    "event": 0
                 }
             ]
         },
@@ -159,34 +183,40 @@
             "levels": [
                 {
                     "diff": 0,
-                    "level": "8"
+                    "level": "8",
+                    "event": 0
                 },
                 {
                     "diff": 1,
-                    "level": "10"
+                    "level": "10",
+                    "event": 0
                 },
                 {
                     "diff": 2,
-                    "level": "11"
+                    "level": "11",
+                    "event": 0
                 }
             ]
         },
         {
-            "id": "Spider's Thread",
-            "name": "Spider's Thread",
+            "id": "Spider\u0027s Thread",
+            "name": "Spider\u0027s Thread",
             "artist": "きくお×cosMo＠暴走P feat.影縫英",
             "levels": [
                 {
                     "diff": 0,
-                    "level": "8"
+                    "level": "8",
+                    "event": 0
                 },
                 {
                     "diff": 1,
-                    "level": "10"
+                    "level": "10",
+                    "event": 0
                 },
                 {
                     "diff": 2,
-                    "level": "測"
+                    "level": "測",
+                    "event": 0
                 }
             ]
         }

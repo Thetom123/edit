@@ -76,10 +76,11 @@ public class SongSelectScript : MonoBehaviour
                     songobj.GetComponent<SongSelectScript>().Jacket = Jacket;*/
 
                     Button btn = songobj.GetComponent<Button>();
+                    int currentEvent = level.@event;
                     btn.onClick.AddListener(() =>
                     {
-                        UpdateSong(songs.id, songs.name, songs.artist);
-                        SaveLastSelectedSong(songs.id, songs.name, songs.artist);
+                        UpdateSong(songs.id, songs.name, songs.artist, currentEvent);
+                        SaveLastSelectedSong(songs.id, songs.name, songs.artist, currentEvent);
                     });
 
                 }
@@ -102,13 +103,13 @@ public class SongSelectScript : MonoBehaviour
     {
     }
 
-    void UpdateSong(string SongID, string SongName, string SongArtist)
+    void UpdateSong(string SongID, string SongName, string SongArtist, int eventStatus = 0)
     {
         if (playButton == null)
         {
             playButton = gameObject.AddComponent<PlayButton>();
         }
-        playButton.SetPlaySong(SongID);
+        playButton.SetPlaySong(SongID, eventStatus);
         var _jacket = Resources.Load<Sprite>("Songs/" + SongID + "/Jacket");
         Jacket.GetComponent<Image>().sprite = _jacket;
         nameobj.GetComponent<TextMeshProUGUI>().text = SongName;
@@ -184,13 +185,14 @@ public class SongSelectScript : MonoBehaviour
         yield break;
     }
 
-    void SaveLastSelectedSong(string songID, string songName, string songArtist)
+    void SaveLastSelectedSong(string songID, string songName, string songArtist, int eventStatus)
     {
         LastSelectedSong lastSelectedSong = new LastSelectedSong
         {
             SongID = songID,
             SongName = songName,
-            SongArtist = songArtist
+            SongArtist = songArtist,
+            EventStatus = eventStatus
         };
 
         string json = JsonUtility.ToJson(lastSelectedSong);
@@ -203,7 +205,7 @@ public class SongSelectScript : MonoBehaviour
         {
             string json = File.ReadAllText(saveFilePath);
             LastSelectedSong lastSelectedSong = JsonUtility.FromJson<LastSelectedSong>(json);
-            UpdateSong(lastSelectedSong.SongID, lastSelectedSong.SongName, lastSelectedSong.SongArtist);
+            UpdateSong(lastSelectedSong.SongID, lastSelectedSong.SongName, lastSelectedSong.SongArtist, lastSelectedSong.EventStatus);
         }
     }
 }
@@ -228,6 +230,7 @@ public class Level
 {
     public int diff;
     public string level;
+    public int @event;
 }
 
 [System.Serializable]
@@ -236,4 +239,5 @@ public class LastSelectedSong
     public string SongID;
     public string SongName;
     public string SongArtist;
+    public int EventStatus;
 }
