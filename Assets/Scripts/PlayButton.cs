@@ -82,6 +82,14 @@ public class PlayButton : MonoBehaviour
         // Fade out to black
         float fadeDuration = 1.0f;
         float elapsed = 0f;
+
+        // Stop preview music
+        SongSelectScript sss = FindObjectOfType<SongSelectScript>();
+        if (sss != null && sss.preview != null)
+        {
+            sss.preview.Stop();
+        }
+
         while (elapsed < fadeDuration)
         {
             elapsed += Time.deltaTime;
@@ -94,8 +102,8 @@ public class PlayButton : MonoBehaviour
         UnityEngine.Video.VideoClip clip = Resources.Load<UnityEngine.Video.VideoClip>("Songs/" + CurrentSong + "/EventVideo");
         if (clip != null)
         {
-            // Create RenderTexture
-            RenderTexture renderTexture = new RenderTexture(1920, 1080, 24);
+            // Create RenderTexture with actual screen dimensions to prevent stretching
+            RenderTexture renderTexture = new RenderTexture(Screen.width, Screen.height, 24);
             
             // Create RawImage to display the video
             GameObject videoImageObj = new GameObject("VideoRawImage");
@@ -116,6 +124,9 @@ public class PlayButton : MonoBehaviour
             videoPlayer.renderMode = UnityEngine.Video.VideoRenderMode.RenderTexture;
             videoPlayer.targetTexture = renderTexture;
             videoPlayer.clip = clip;
+            
+            // Maintain aspect ratio with black bars (FitInside)
+            videoPlayer.aspectRatio = UnityEngine.Video.VideoAspectRatio.FitInside;
             
             // Fix for frozen video / fast audio
             videoPlayer.skipOnDrop = false;
